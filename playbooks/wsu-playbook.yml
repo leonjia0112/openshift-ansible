@@ -1,0 +1,107 @@
+---
+- hosts: localhost
+  vars:
+    openshift_node_machineconfigpool: 'worker'
+    openshift_node_kubeconfig_path: "{{ openshift_kubeconfig_path | default('~/.kube/config') | expanduser | realpath }}"
+    openshift_node_kubeconfig: "{{ lookup('file', openshift_node_kubeconfig_path) | from_yaml }}"
+    openshift_node_bootstrap_port: 22623
+    openshift_node_bootstrap_server: "{{ openshift_node_kubeconfig.clusters.0.cluster.server.split(':')[0:-1] | join(':') }}:{{ openshift_node_bootstrap_port }}"
+    openshift_node_bootstrap_endpoint: "{{ openshift_node_bootstrap_server }}/config/{{ openshift_node_machineconfigpool }}"
+    
+  tasks:
+    - name: Check parameters
+      fail:
+        msg: Please provide correct parameters
+      when: kubelet_location is not defined or
+             kubeovn_location is not defined or
+             ignition_location is not defined or
+             wmcb_location is not defined or
+             openshift_kubeconfig_path is no defined
+ 
+    - name: Show ignition file endpoint 
+      debug:
+        msg: "{{ openshift_node_bootstrap_endpoint }}"
+
+    - name: Wait for bootstrap endpoint to show up
+      uri:
+        url: "{{ openshift_node_bootstrap_endpoint }}" 
+        validate_certs: false
+      delay: 10
+      retries: 60
+      register: result
+      until:
+        - result.status is defined
+        - result.status == 200
+   
+    - name: Fetch bootstrap ignition file locally
+      uri:
+        url: "{{ openshift_node_bootstrap_endpoint }}"
+        dest: /home/bootstrap.ign
+        validate_certs: false
+      register: bootstrap_ignition
+
+    - name: Download Kubelet to controller machine
+      get_url:
+        url: {{ kubelet_location }} 
+        dest: /home/kubelet.exe
+        mode: 0400
+ 
+    - name: Download kubeovn to controller machine
+      get_url:
+        url: {{ kubeovn_location }}
+        dest: /home/kubeovn.exe
+        mode: 0400
+
+    - name: Download wmcb to controller machine
+      get_url:
+        url: {{ wmcb_location }}
+        dest: /home/wmcb.exe
+        mode: 0400
+
+
+
+- hosts: win
+  tasks:
+    - name: Descryption 
+      debug:
+        msg: Preparing your Windows server 
+
+        #    - name: Transfer something
+        #      win_copy:
+        #        src: /home/leojia/hw.ps1
+        #        dest: C:\Users\Administrator\hw.ps1
+        #
+        #    - name: execute powershell testing
+        #      raw: C:\Users\Administrator\hw.ps1 
+
+    - name: Create target directory if it is not exist
+      win_file:
+        path: C:\openshift
+        state: directory
+
+    - name: copy kubelet.exe to Windows host
+      win_copy:
+        src: /home/kubelet.exe
+        dest: C:\openshift\kubelet.exe
+
+    - name: copy kubeovn.exe to Windows hsot
+      win_copy:
+        src: /home/kubeovn.exe
+        dest: C:\openshift\kubeovn.exe
+
+    - name: copy wmcb.exe to Windows host
+      win_copy:
+        src: /home/wmcb.exe
+        dest: C:\openshift\wmcb.exe
+
+    - name: copy ignition file to Windows host
+      win_copy:
+        src: /home/bootstrap.ign 
+        dest: C:\openshift\config.ign
+
+    - name: execute wmcb.exe
+      raw: C:\openshift\wmcb.exe
+
+    - name: reboot the machine (optional)
+      win_reboot:
+
